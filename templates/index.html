@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report Exchange</title>
+<style>
+:root{--bg:#f2f5f9;--ink:#16233b;--muted:#5b6b82;--line:#d5dde8;--card:#fff;--accent:#0e6e6e;--on:#fff;--warn:#a15c07;--bad:#a82424;--good:#17693a}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1724;--ink:#e6ecf5;--muted:#9aa9bf;--line:#26344a;--card:#16233a;--accent:#4fc3c3;--on:#06222a;--warn:#e0a24a;--bad:#f08a8a;--good:#6fd09a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,Segoe UI,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid var(--line);background:var(--card)}
+h1,h2,h3{font-family:Georgia,serif;margin:0;font-weight:700}
+h1{font-size:1.35rem}h2{font-size:1.25rem;margin-bottom:12px}h3{font-size:1.05rem}
+main{max-width:860px;margin:0 auto;padding:24px 16px 64px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+#auth{max-width:440px;margin:0 auto}
+label{display:block;font-size:.9rem;color:var(--muted);margin:12px 0 4px}
+input,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+button{font:inherit;padding:8px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--on);cursor:pointer}
+button.ghost{background:transparent;color:var(--accent)}
+button:disabled{opacity:.5;cursor:default}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+form button[type=submit]{margin-top:16px}
+nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+nav button{background:transparent;color:var(--ink);border-color:var(--line)}
+nav button[aria-selected=true]{background:var(--accent);color:var(--on);border-color:var(--accent)}
+.bar{display:flex;gap:8px;margin-bottom:16px}.bar input{flex:1}
+.item{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:10px}
+.meta,.empty{color:var(--muted);margin:2px 0 0}
+.side{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.badge{font-size:.85rem;padding:2px 10px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
+.badge.approved,.badge.owner{color:var(--good);border-color:var(--good)}
+.badge.pending{color:var(--warn);border-color:var(--warn)}
+.badge.denied{color:var(--bad);border-color:var(--bad)}
+#msg{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);max-width:90%;padding:10px 16px;border-radius:8px;background:var(--ink);color:var(--bg);display:none;z-index:9}
+#msg.bad{background:var(--bad);color:#fff}#msg.good{background:var(--good);color:#fff}
+dialog{max-width:620px;width:92%;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);padding:22px}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.actions{display:flex;gap:8px;margin-top:16px}
+[hidden]{display:none!important}
+h2.sub{margin-top:28px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Report Exchange</h1>
+  <div id="who" hidden><span id="whoText"></span> <button class="ghost" id="logout">Log out</button></div>
+</header>
+<main>
+
+<section id="auth">
+  <div class="card" id="loginCard">
+    <h2>Log in</h2>
+    <form id="loginForm">
+      <label for="lid">Student ID (number)</label><input id="lid" required inputmode="numeric" maxlength="8" placeholder="8 digits">
+      <label for="lpw">Password</label><input id="lpw" type="password" required>
+      <button type="submit">Log in</button>
+    </form>
+    <p class="meta" style="margin-top:20px">New here?</p>
+    <button type="button" class="ghost" id="showReg">Register now</button>
+  </div>
+  <div class="card" id="regCard" hidden>
+    <h2>Create an account</h2>
+    <form id="regForm">
+      <label for="rid">Student ID (number)</label><input id="rid" required inputmode="numeric" maxlength="8" placeholder="8 digits">
+      <label for="rfn">First name</label><input id="rfn" required>
+      <label for="rln">Last name</label><input id="rln" required>
+      <label for="rmj">Major</label><input id="rmj" placeholder="e.g: IT" required>
+      <label for="rlv">Level</label><input id="rlv" placeholder="e.g: Senior" required>
+      <label for="rpw">Password</label><input id="rpw" type="password" required>
+      <button type="submit">Create account</button>
+    </form>
+    <p class="meta" style="margin-top:20px">Already registered?</p>
+    <button type="button" class="ghost" id="showLogin">Back to log in</button>
+  </div>
+</section>
+
+<section id="app" hidden>
+  <nav role="tablist">
+    <button data-tab="search" role="tab">Find reports</button>
+    <button data-tab="mine" role="tab">My reports</button>
+    <button data-tab="add" role="tab">Add a report</button>
+    <button data-tab="requests" role="tab">Access requests</button>
+  </nav>
+
+  <div id="tab-search">
+    <form class="bar" id="searchForm">
+      <input id="q" type="search" placeholder="Search by title, type or keyword" aria-label="Search reports">
+      <button type="submit">Search</button>
+    </form>
+    <div id="results"></div>
+  </div>
+
+  <div id="tab-mine" hidden><div id="mineList"></div></div>
+
+  <div id="tab-add" hidden>
+    <div class="card">
+      <h2>Add a report</h2>
+      <form id="addForm">
+        <label for="ttl">Title</label><input id="ttl" required>
+        <label for="typ">Type (for example Project)</label><input id="typ" required>
+        <label for="k1">Keyword 1</label><input id="k1" required>
+        <label for="k2">Keyword 2</label><input id="k2" required>
+        <label for="k3">Keyword 3</label><input id="k3" required>
+        <label for="dt">Date</label><input id="dt" type="date" required>
+        <label for="fl">Report file (PDF, DOC, DOCX or TXT, max 10 MB)</label>
+        <input id="fl" type="file" accept=".pdf,.doc,.docx,.txt" required>
+        <button type="submit">Upload report</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="tab-requests" hidden>
+    <h2>Requests to read your reports</h2><div id="received"></div>
+    <h2 class="sub">Requests you sent</h2><div id="sent"></div>
+  </div>
+</section>
+</main>
+
+<dialog id="viewer"><div id="viewerBody"></div><form method="dialog" class="actions" id="viewerActions"><button class="ghost">Close</button></form></dialog>
+<div id="msg" role="status" aria-live="polite"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let session = {access:null, refresh:null, ids:null};
+try { const s = sessionStorage.getItem("session"); if (s) session = JSON.parse(s); } catch (e) {}
+const save = () => { try { sessionStorage.setItem("session", JSON.stringify(session)); } catch (e) {} };
+const validId = v => /^[1-9]\d{7}$/.test(String(v));
+document.querySelectorAll("#lid,#rid").forEach(el => el.addEventListener("input", () => { el.value = el.value.replace(/\D/g, "").slice(0, 8); }));
+
+let timer;
+function notify(text, kind) {
+  const m = $("#msg"); m.textContent = text; m.className = kind || ""; m.style.display = "block";
+  clearTimeout(timer); timer = setTimeout(() => m.style.display = "none", 3500);
+}
+
+async function refreshToken() {
+  if (!session.refresh) return false;
+  try {
+    const r = await fetch("/refresh", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({refresh_token:session.refresh})});
+    if (r.ok) { session.access = (await r.json()).access_token; save(); return true; }
+  } catch (e) {}
+  logout("Your session ended. Please log in again.");
+  return false;
+}
+
+async function api(path, method = "GET", body = null, retry = true) {
+  const headers = {};
+  const isForm = body instanceof FormData;
+  if (body && !isForm) headers["Content-Type"] = "application/json";
+  if (session.access) headers["Authorization"] = "Bearer " + session.access;
+  let res;
+  try { res = await fetch(path, {method, headers, body: body ? (isForm ? body : JSON.stringify(body)) : undefined}); }
+  catch (e) { return {ok:false, status:0, data:{error:"Cannot reach the server. Check that flask run is still running."}}; }
+  let data = {}; try { data = await res.json(); } catch (e) {}
+  if (res.status === 401 && retry && /expired/i.test(data.error || "") && await refreshToken()) return api(path, method, body, false);
+  return {ok:res.ok, status:res.status, data};
+}
+
+async function download(id, name) {
+  const get = () => fetch("/reports/" + id + "/download", {headers:{Authorization:"Bearer " + session.access}});
+  let res;
+  try { res = await get(); } catch (e) { notify("Cannot reach the server.", "bad"); return; }
+  if (res.status === 401 && await refreshToken()) res = await get();
+  if (!res.ok) { let d = {}; try { d = await res.json(); } catch (e) {} notify(d.error || "Download failed", "bad"); return; }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a"); a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function ui() {
+  const on = !!session.access;
+  $("#auth").hidden = on; $("#app").hidden = !on; $("#who").hidden = !on;
+  if (on) $("#whoText").textContent = "Student #" + session.ids;
+    if (!on) { $("#loginCard").hidden = false; $("#regCard").hidden = true; }
+}
+function logout(text) { session = {access:null, refresh:null, ids:null}; save(); ui(); if (text) notify(text); }
+
+function show(tab) {
+  document.querySelectorAll("[data-tab]").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
+  ["search","mine","add","requests"].forEach(t => $("#tab-" + t).hidden = t !== tab);
+  if (tab === "search") runSearch();
+  if (tab === "mine") loadMine();
+  if (tab === "requests") loadRequests();
+}
+
+async function doLogin(ids, pw) {
+    if (!Number.isInteger(ids) || ids <= 0) { notify("Enter your student ID (digits only).", "bad"); return; }
+  const r = await api("/login", "POST", {IDs: ids, Password: pw});
+  if (!r.ok) { notify(r.data.error || "Login failed", "bad"); return; }
+  session = {access:r.data.access_token, refresh:r.data.refresh_token, ids}; save(); ui(); show("search");
+}
+
+$("#loginForm").addEventListener("submit", e => { e.preventDefault(); doLogin(Number($("#lid").value), $("#lpw").value); });
+$("#regForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const ids = Number($("#rid").value);
+  if (!validId(ids)) { notify("Student ID must be exactly 8 digits.", "bad"); return; }
+  const r = await api("/student", "POST", {IDs: ids, FN: $("#rfn").value, LN: $("#rln").value, DMajor: $("#rmj").value, Level: $("#rlv").value, Password: $("#rpw").value});
+  if (!r.ok) { notify(r.data.error || "Could not create account", "bad"); return; }
+  notify("Account created.", "good"); doLogin(ids, $("#rpw").value);
+});
+$("#logout").addEventListener("click", () => logout("Logged out."));
+$("#showReg").addEventListener("click", () => { $("#loginCard").hidden = true; $("#regCard").hidden = false; });
+$("#showLogin").addEventListener("click", () => { $("#regCard").hidden = true; $("#loginCard").hidden = false; });
+document.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => show(b.dataset.tab)));
+
+const LABEL = {none:"Not requested", pending:"Request pending", approved:"Access granted", denied:"Request denied", owner:"Your report"};
+
+function card(r) {
+  const a = r.Access; let btn;
+  if (a === "owner" || a === "approved") btn = `<button data-act="read" data-id="${r.IDr}">Open report</button>`;
+  else if (a === "pending") btn = `<button disabled>Request pending</button>`;
+  else btn = `<button data-act="ask" data-id="${r.IDr}">Request access</button>`;
+  return `<article class="item"><div><h3>${esc(r.Title)}</h3><p class="meta">${esc(r.Type)} by ${esc(r.Owner)}</p></div><div class="side"><span class="badge ${a}">${LABEL[a]}</span>${btn}</div></article>`;
+}
+
+async function runSearch() {
+  const q = $("#q").value.trim();
+  if (!q) {
+    $("#results").innerHTML = `<p class="empty">Type a title, type or keyword above to find reports.</p>`;
+    return;
+  }
+  const r = await api("/reports/search?q=" + encodeURIComponent(q));
+  if (!r.ok) { notify(r.data.error || "Search failed", "bad"); return; }
+  $("#results").innerHTML = r.data.length ? r.data.map(card).join("")
+    : `<p class="empty">No reports match “${esc(q)}”. Try another keyword.</p>`;
+}
+$("#searchForm").addEventListener("submit", e => { e.preventDefault(); runSearch(); });
+
+async function loadMine() {
+  const r = await api("/reports/mine");
+  if (!r.ok) { notify(r.data.error || "Could not load reports", "bad"); return; }
+  $("#mineList").innerHTML = r.data.length ? r.data.map(x =>
+    `<article class="item"><div><h3>${esc(x.Title)}</h3><p class="meta">${esc(x.Type)}, ${esc(x.Date)}. Keywords: ${esc(x.K1)}, ${esc(x.K2)}, ${esc(x.K3)}</p></div><div class="side"><span class="badge">Report #${x.IDr}</span><button class="ghost" data-act="download" data-id="${x.IDr}" data-name="${esc(x.FileName)}">Download ${esc(x.FileName)}</button></div></article>`).join("")
+    : `<p class="empty">You have not added a report yet.</p>`;
+}
+
+$("#addForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const file = $("#fl").files[0];
+  if (file && file.size > 10 * 1024 * 1024) { notify("File is too large (maximum 10 MB).", "bad"); return; }
+  const form = new FormData();
+  form.append("Title", $("#ttl").value); form.append("Type", $("#typ").value);
+  form.append("K1", $("#k1").value); form.append("K2", $("#k2").value); form.append("K3", $("#k3").value);
+  form.append("Date", $("#dt").value); form.append("file", file);
+  const r = await api("/report", "POST", form);
+  if (!r.ok) { notify(r.data.error || "Could not upload report", "bad"); return; }
+  notify("Report #" + r.data.IDr + " uploaded.", "good"); e.target.reset(); $("#dt").valueAsDate = new Date();
+});
+$("#dt").valueAsDate = new Date();
+
+async function loadRequests() {
+  const [rec, sent, st, rp] = await Promise.all([api("/requests/received"), api("/requests/sent"), api("/students"), api("/reports")]);
+  const students = Array.isArray(st.data) ? st.data : [], reps = Array.isArray(rp.data) ? rp.data : [];
+  const name = id => { const s = students.find(x => x.IDs === id); return s ? s.FN + " " + s.LN : "Student #" + id; };
+  const title = id => { const x = reps.find(x => x.IDr === id); return x ? x.Title : "Report #" + id; };
+  const rl = Array.isArray(rec.data) ? rec.data : [], sl = Array.isArray(sent.data) ? sent.data : [];
+  $("#received").innerHTML = rl.length ? rl.map(q =>
+    `<article class="item"><div><h3>${esc(name(q.Requester))}</h3><p class="meta">wants to read “${esc(title(q.IDr))}”</p></div><div class="side"><span class="badge ${q.Status}">${q.Status}</span>` +
+    (q.Status === "pending" ? `<button data-act="answer" data-id="${q.IDq}" data-status="approved">Approve</button><button class="ghost" data-act="answer" data-id="${q.IDq}" data-status="denied">Deny</button>` : "") +
+    `</div></article>`).join("") : `<p class="empty">No one has asked to read your reports yet.</p>`;
+  $("#sent").innerHTML = sl.length ? sl.map(q =>
+    `<article class="item"><div><h3>${esc(title(q.IDr))}</h3><p class="meta">Owner: ${esc(name(q.Owner))}</p></div><div class="side"><span class="badge ${q.Status}">${q.Status}</span></div></article>`).join("")
+    : `<p class="empty">You have not requested access to any report. Use Find reports to search.</p>`;
+}
+
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const id = b.dataset.id;
+  if (b.dataset.act === "ask") {
+    const r = await api("/reports/" + id + "/request", "POST");
+    notify(r.ok ? "Request sent to the owner." : (r.data.error || "Request failed"), r.ok ? "good" : "bad");
+    if (r.ok) runSearch();
+  } else if (b.dataset.act === "read") {
+    const r = await api("/reports/" + id);
+    if (!r.ok) { notify(r.data.error || "Could not open report", "bad"); return; }
+    const x = r.data;
+    $("#viewerBody").innerHTML = `<h2>${esc(x.Title)}</h2><p class="meta">${esc(x.Type)}, ${esc(x.Date)}. Keywords: ${esc(x.K1)}, ${esc(x.K2)}, ${esc(x.K3)}</p><div class="actions"><button data-act="download" data-id="${x.IDr}" data-name="${esc(x.FileName)}">Download ${esc(x.FileName)}</button></div>`;
+    $("#viewer").showModal();
+  } else if (b.dataset.act === "download") {
+    download(id, b.dataset.name);
+  } else if (b.dataset.act === "answer") {
+    const r = await api("/requests/" + id, "PUT", {Status: b.dataset.status});
+    notify(r.ok ? "Request " + b.dataset.status + "." : (r.data.error || "Could not update"), r.ok ? "good" : "bad");
+    if (r.ok) loadRequests();
+  }
+});
+
+ui(); if (session.access) show("search");
+</script>
+</body>
+</html>

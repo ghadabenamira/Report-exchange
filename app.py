@@ -81,14 +81,14 @@ def access_status(report, ids):
     return status
 
 
-def report_preview(r):
+def report_preview(r, viewer=None):
     owner = find_student(r["IDs"])
     return {
         "IDr": r["IDr"],
         "Title": r["Title"],
         "Type": r["Type"],
         "Owner": f"{owner['FN']} {owner['LN']}" if owner else "Unknown",
-        "Access": access_status(r, g.IDs),
+        "Access": access_status(r, viewer),
     }
 
 
@@ -121,7 +121,22 @@ def require_token(f):
         g.IDs = item["IDs"]
         return f(*args, **kwargs)
     return wrapper
+def current_student():
+    """IDs of the logged-in student if a valid token is sent, otherwise None."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    item = find_token(access_tokens, auth.split(" ", 1)[1])
+    if item is None or time.time() > item["expires_at"]:
+        return None
+    return item["IDs"]
 
+
+def remove_report_file(report):
+    try:
+        os.remove(os.path.join(UPLOAD_DIR, report.get("File", "")))
+    except OSError:
+        pass
 
 # ---------- HOME PAGE ----------
 @app.route("/", methods=["GET"])
@@ -252,9 +267,10 @@ def add_report():
 
 
 @app.route("/reports", methods=["GET"])
-@require_token
 def get_reports():
-    return jsonify([report_preview(r) for r in reports]), 200
+    viewer = current_student()
+    return jsonify([report_preview(r, viewer) for r in reports]), 200
+
 
 
 @app.route("/reports/mine", methods=["GET"])
@@ -264,34 +280,28 @@ def my_reports():
 
 
 @app.route("/reports/search", methods=["GET"])
-@require_token
 def search_reports():
     q = request.args.get("q", "").strip().lower()
     if not q:
         return jsonify({"error": "Missing search text, use /reports/search?q=..."}), 400
 
+    viewer = current_student()
     results = [
-        report_preview(r) for r in reports
+        report_preview(r, viewer) for r in reports
         if any(q in str(r[f]).lower() for f in ["Title", "Type", "K1", "K2", "K3"])
     ]
     return jsonify(results), 200
 
 
 @app.route("/reports/<int:idr>", methods=["GET"])
-@require_token
 def view_report(idr):
     report = find_report(idr)
     if report is None:
         return jsonify({"error": f"Report {idr} not found"}), 404
 
-    status = access_status(report, g.IDs)
-    if status in ("owner", "approved"):
-        return jsonify(public_report(report)), 200
-
-    return jsonify({
-        "error": "Access required. Send a request to the owner.",
-        "access": status,
-    }), 403
+    data = public_report(report)
+    data["Access"] = access_status(report, current_student())
+    return jsonify(data), 200
 
 
 @app.route("/reports/<int:idr>/download", methods=["GET"])
@@ -380,6 +390,107 @@ def answer_request(idq):
     rep = find_report(req["IDr"]) or {}
     return jsonify({"message": f"Request {data['Status']}", "request": req,
                     "notify": asker.get("Email", ""), "title": rep.get("Title", "")}), 200
+
+# ---------- STUDENT BY ID, PUT, DELETE ----------
+@app.route("/students/<int:ids>", methods=["GET"])
+@require_token
+def get_student(ids):
+    s = find_student(ids)
+    if s is None:
+        return jsonify({"error": f"Student {ids} not found"}), 404
+    hidden = ("Password",) if ids == g.IDs else ("Password", "Email")
+    return jsonify({k: v for k, v in s.items() if k not in hidden}), 200
+
+
+@app.route("/students/<int:ids>", methods=["PUT"])
+@require_token
+def update_student(ids):
+    if ids != g.IDs:
+        return jsonify({"error": "You can only edit your own account"}), 403
+    s = find_student(ids)
+    if s is None:
+        return jsonify({"error": f"Student {ids} not found"}), 404
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not data:
+        return jsonify({"error": "Send a JSON object with the fields to update"}), 400
+
+    allowed = ["FN", "LN", "DMajor", "Level", "Email", "Password"]
+    for key, value in data.items():
+        if key not in allowed:
+            return jsonify({"error": f"Field '{key}' cannot be updated"}), 400
+        if value in ("", None):
+            return jsonify({"error": f"Field '{key}' cannot be empty"}), 400
+    if "Email" in data and "@" not in str(data["Email"]):
+        return jsonify({"error": "Email is not valid"}), 400
+
+    s.update(data)
+    save_data()
+    return jsonify({k: v for k, v in s.items() if k != "Password"}), 200
+
+
+@app.route("/students/<int:ids>", methods=["DELETE"])
+@require_token
+def delete_student(ids):
+    if ids != g.IDs:
+        return jsonify({"error": "You can only delete your own account"}), 403
+    s = find_student(ids)
+    if s is None:
+        return jsonify({"error": f"Student {ids} not found"}), 404
+
+    for r in [r for r in reports if r["IDs"] == ids]:
+        remove_report_file(r)
+    reports[:] = [r for r in reports if r["IDs"] != ids]
+    access_requests[:] = [q for q in access_requests if ids not in (q["Requester"], q["Owner"])]
+    students.remove(s)
+    access_tokens[:] = [t for t in access_tokens if t["IDs"] != ids]
+    refresh_tokens[:] = [t for t in refresh_tokens if t["IDs"] != ids]
+    save_data()
+    return jsonify({"message": "Account deleted"}), 200
+
+
+# ---------- REPORT PUT, DELETE ----------
+@app.route("/reports/<int:idr>", methods=["PUT"])
+@require_token
+def update_report(idr):
+    report = find_report(idr)
+    if report is None:
+        return jsonify({"error": f"Report {idr} not found"}), 404
+    if report["IDs"] != g.IDs:
+        return jsonify({"error": "Only the owner can edit this report"}), 403
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not data:
+        return jsonify({"error": "Send a JSON object with the fields to update"}), 400
+
+    allowed = ["Title", "Type", "K1", "K2", "K3", "Date"]
+    for key, value in data.items():
+        if key not in allowed:
+            return jsonify({"error": f"Field '{key}' cannot be updated"}), 400
+        if value in ("", None):
+            return jsonify({"error": f"Field '{key}' cannot be empty"}), 400
+
+    report.update(data)
+    save_data()
+    return jsonify(public_report(report)), 200
+
+
+@app.route("/reports/<int:idr>", methods=["DELETE"])
+@require_token
+def delete_report(idr):
+    report = find_report(idr)
+    if report is None:
+        return jsonify({"error": f"Report {idr} not found"}), 404
+    if report["IDs"] != g.IDs:
+        return jsonify({"error": "Only the owner can delete this report"}), 403
+
+    remove_report_file(report)
+    reports.remove(report)
+    access_requests[:] = [q for q in access_requests if q["IDr"] != idr]
+    save_data()
+    return jsonify({"message": f"Report {idr} deleted"}), 200
+
+
 # ---------- GLOBAL ERROR HANDLERS ----------
 @app.errorhandler(404)
 def not_found(e):

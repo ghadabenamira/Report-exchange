@@ -174,7 +174,7 @@ def refresh():
 def add_student():
     data = request.get_json(silent=True)
 
-    error = check_fields(data, ["IDs", "FN", "LN", "DMajor", "Level", "Password"])
+    error = check_fields(data, ["IDs", "FN", "LN", "DMajor", "Level", "Email", "Password"])
     if error:
         return jsonify({"error": error}), 400
 
@@ -190,6 +190,7 @@ def add_student():
         "LN": data["LN"],
         "DMajor": data["DMajor"],
         "Level": data["Level"],
+        "Email": data["Email"],
         "Password": data["Password"],
     })
     save_data()
@@ -199,9 +200,16 @@ def add_student():
 @app.route("/students", methods=["GET"])
 @require_token
 def get_students():
-    safe = [{k: v for k, v in s.items() if k != "Password"} for s in students]
+    safe = [{k: v for k, v in s.items() if k not in ("Password", "Email")} for s in students]
     return jsonify(safe), 200
 
+@app.route("/me", methods=["GET"])
+@require_token
+def me():
+    s = find_student(g.IDs)
+    if s is None:
+        return jsonify({"error": "Student not found"}), 404
+    return jsonify({k: v for k, v in s.items() if k != "Password"}), 200
 
 # ---------- REPORTS ----------
 @app.route("/report", methods=["POST"])
@@ -329,8 +337,9 @@ def request_access(idr):
     }
     access_requests.append(req)
     save_data()
-    return jsonify({"message": "Access request sent", "request": req}), 201
-
+    owner = find_student(report["IDs"]) or {}
+    return jsonify({"message": "Access request sent", "request": req,
+                    "notify": owner.get("Email", ""), "title": report["Title"]}), 201
 
 @app.route("/requests/received", methods=["GET"])
 @require_token
@@ -367,9 +376,10 @@ def answer_request(idq):
 
     req["Status"] = data["Status"]
     save_data()
-    return jsonify({"message": f"Request {data['Status']}", "request": req}), 200
-
-
+    asker = find_student(req["Requester"]) or {}
+    rep = find_report(req["IDr"]) or {}
+    return jsonify({"message": f"Request {data['Status']}", "request": req,
+                    "notify": asker.get("Email", ""), "title": rep.get("Title", "")}), 200
 # ---------- GLOBAL ERROR HANDLERS ----------
 @app.errorhandler(404)
 def not_found(e):

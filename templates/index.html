@@ -80,6 +80,11 @@ dialog::backdrop{background:rgba(10,12,16,.55);backdrop-filter:blur(3px)}
 #msg{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:92%;padding:12px 20px;border-radius:14px;background:var(--ink);color:var(--bg);display:none;z-index:20;font-weight:500;box-shadow:var(--shadow)}
 #msg.bad{background:var(--bad);color:#fff}#msg.good{background:var(--good);color:#fff}
  
+.profile{max-width:520px}
+.avatar{width:72px;height:72px;border-radius:50%;background:var(--accent);color:var(--on);display:grid;place-items:center;font-size:1.6rem;font-weight:700;margin-bottom:14px;text-transform:uppercase}
+.profile dl{margin:22px 0 0;display:grid;gap:0}
+.profile dl div{display:flex;justify-content:space-between;gap:16px;padding:14px 0;border-top:1px solid var(--line)}
+.profile dt{color:var(--muted);font-size:.9rem}.profile dd{margin:0;font-weight:600;text-align:right;word-break:break-all}
 @media (max-width:820px){
   #auth{grid-template-columns:1fr}
   .hero{padding:28px 24px 36px}.hero h1{margin:28px 0 10px;font-size:2rem}.hero ul,.hero::after{display:none}
@@ -125,6 +130,7 @@ dialog::backdrop{background:rgba(10,12,16,.55);backdrop-filter:blur(3px)}
           <div><label for="rfn">First name</label><input id="rfn" required></div>
           <div><label for="rln">Last name</label><input id="rln" required></div>
         </div>
+        <label for="rem">Email</label><input id="rem" type="email" placeholder="you@example.com" required autocomplete="email">
         <div class="row">
           <div><label for="rmj">Major</label><input id="rmj" placeholder="e.g: IT" required></div>
           <div><label for="rlv">Level</label><input id="rlv" placeholder="e.g: Senior" required></div>
@@ -145,6 +151,7 @@ dialog::backdrop{background:rgba(10,12,16,.55);backdrop-filter:blur(3px)}
       <button data-tab="mine" role="tab">My reports</button>
       <button data-tab="add" role="tab">Add a report</button>
       <button data-tab="requests" role="tab">Requests</button>
+      <button data-tab="profile" role="tab">Profile</button>
     </nav>
     <div class="chip"><span class="who-name" id="whoText"></span><button class="ghost" id="logout">Log out</button></div>
   </header>
@@ -183,6 +190,19 @@ dialog::backdrop{background:rgba(10,12,16,.55);backdrop-filter:blur(3px)}
           <input id="fl" type="file" accept=".pdf,.doc,.docx,.txt" required>
           <button type="submit" class="full">Upload report</button>
         </form>
+      </div>
+    </div>
+ 
+    <div id="tab-profile" hidden>
+      <div class="card profile">
+        <div class="avatar" id="pAv"></div>
+        <h2 id="pName"></h2><p class="meta">Your profile</p>
+        <dl>
+          <div><dt>Student ID (username)</dt><dd id="pId"></dd></div>
+          <div><dt>Email</dt><dd id="pEm"></dd></div>
+          <div><dt>Major</dt><dd id="pMj"></dd></div>
+          <div><dt>Level</dt><dd id="pLv"></dd></div>
+        </dl>
       </div>
     </div>
  
@@ -257,18 +277,19 @@ function logout(text) { session = {access:null, refresh:null, ids:null}; save();
  
 function show(tab) {
   document.querySelectorAll("[data-tab]").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
-  ["search","mine","add","requests"].forEach(t => $("#tab-" + t).hidden = t !== tab);
+  ["search","mine","add","requests","profile"].forEach(t => $("#tab-" + t).hidden = t !== tab);
   window.scrollTo({top:0});
   if (tab === "search") runSearch();
   if (tab === "mine") loadMine();
   if (tab === "requests") loadRequests();
+  if (tab === "profile") loadProfile();
 }
  
 async function doLogin(ids, pw) {
   if (!Number.isInteger(ids) || ids <= 0) { notify("Enter your student ID (digits only).", "bad"); return; }
   const r = await api("/login", "POST", {IDs: ids, Password: pw});
   if (!r.ok) { notify(r.data.error || "Login failed", "bad"); return; }
-  session = {access:r.data.access_token, refresh:r.data.refresh_token, ids}; save(); ui(); show("search");
+  me = null; session = {access:r.data.access_token, refresh:r.data.refresh_token, ids}; save(); ui(); show("search");
 }
  
 $("#loginForm").addEventListener("submit", e => { e.preventDefault(); doLogin(Number($("#lid").value), $("#lpw").value); });
@@ -276,7 +297,7 @@ $("#regForm").addEventListener("submit", async e => {
   e.preventDefault();
   const ids = Number($("#rid").value);
   if (!validId(ids)) { notify("Student ID must be exactly 8 digits.", "bad"); return; }
-  const r = await api("/student", "POST", {IDs: ids, FN: $("#rfn").value, LN: $("#rln").value, DMajor: $("#rmj").value, Level: $("#rlv").value, Password: $("#rpw").value});
+  const r = await api("/student", "POST", {IDs: ids, FN: $("#rfn").value, LN: $("#rln").value, DMajor: $("#rmj").value, Level: $("#rlv").value, Email: $("#rem").value.trim(), Password: $("#rpw").value});
   if (!r.ok) { notify(r.data.error || "Could not create account", "bad"); return; }
   notify("Account created.", "good"); doLogin(ids, $("#rpw").value);
 });
@@ -343,13 +364,42 @@ async function loadRequests() {
     : `<p class="empty">You have not requested access to any report yet.</p>`;
 }
  
+let me = null;
+async function getMe() {
+  if (me) return me;
+  const r = await api("/me");
+  me = r.ok ? r.data : {};
+  return me;
+}
+async function loadProfile() {
+  me = null; const m = await getMe();
+  if (!m.IDs) { notify("Could not load your profile.", "bad"); return; }
+  $("#pAv").textContent = (m.FN || "?")[0] + (m.LN || "")[0];
+  $("#pName").textContent = m.FN + " " + m.LN;
+  $("#pId").textContent = m.IDs; $("#pEm").textContent = m.Email || "Not set";
+  $("#pMj").textContent = m.DMajor; $("#pLv").textContent = m.Level;
+}
+ 
+// Email notifications through formsubmit.co: you receive the message, the student is copied
+const NOTIFY_TO = "benamira.ghada56@gmail.com";
+async function sendMail(cc, subject, message) {
+  if (!cc) return;
+  try {
+    await fetch("https://formsubmit.co/ajax/" + NOTIFY_TO, {method:"POST", headers:{"Content-Type":"application/json", "Accept":"application/json"},
+      body: JSON.stringify({_subject: subject, _cc: cc, _captcha: "false", _template: "table", message})});
+  } catch (e) {}
+}
+ 
 document.addEventListener("click", async e => {
   const b = e.target.closest("[data-act]"); if (!b) return;
   const id = b.dataset.id;
   if (b.dataset.act === "ask") {
     const r = await api("/reports/" + id + "/request", "POST");
     notify(r.ok ? "Request sent to the owner." : (r.data.error || "Request failed"), r.ok ? "good" : "bad");
-    if (r.ok) runSearch();
+    if (r.ok) {
+      runSearch(); const m = await getMe();
+      sendMail(r.data.notify, "New access request for your report", (m.FN || "A student") + " " + (m.LN || "") + " (Student #" + session.ids + ") asked to read \"" + r.data.title + "\". Open Report Exchange > Requests to answer.");
+    }
   } else if (b.dataset.act === "read") {
     const r = await api("/reports/" + id);
     if (!r.ok) { notify(r.data.error || "Could not open report", "bad"); return; }
@@ -361,7 +411,10 @@ document.addEventListener("click", async e => {
   } else if (b.dataset.act === "answer") {
     const r = await api("/requests/" + id, "PUT", {Status: b.dataset.status});
     notify(r.ok ? "Request " + b.dataset.status + "." : (r.data.error || "Could not update"), r.ok ? "good" : "bad");
-    if (r.ok) loadRequests();
+    if (r.ok) {
+      loadRequests();
+      sendMail(r.data.notify, "Your access request was " + b.dataset.status, "Your request to read \"" + r.data.title + "\" was " + b.dataset.status + ".");
+    }
   }
 });
  
@@ -370,6 +423,7 @@ ui(); if (session.access) show("search");
 </body>
 </html>
  
+
 
 
 

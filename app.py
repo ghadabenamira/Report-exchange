@@ -91,6 +91,20 @@ def report_preview(r, viewer=None):
         "Access": access_status(r, viewer),
     }
 
+def request_view(q):
+    """A request with names instead of student IDs."""
+    requester = find_student(q["Requester"]) or {}
+    owner = find_student(q["Owner"]) or {}
+    report = find_report(q["IDr"]) or {}
+    return {
+        "IDq": q["IDq"],
+        "IDr": q["IDr"],
+        "Title": report.get("Title", ""),
+        "Status": q["Status"],
+        "RequesterName": f"{requester.get('FN', '')} {requester.get('LN', '')}".strip() or "Unknown",
+        "OwnerName": f"{owner.get('FN', '')} {owner.get('LN', '')}".strip() or "Unknown",
+    }
+
 
 # ---------- TOKEN HELPERS ----------
 def create_token(token_list, ids, seconds):
@@ -215,8 +229,19 @@ def add_student():
 @app.route("/students", methods=["GET"])
 @require_token
 def get_students():
-    safe = [{k: v for k, v in s.items() if k not in ("Password", "Email")} for s in students]
+    safe = [{k: v for k, v in s.items() if k not in ("IDs", "Password", "Email")} for s in students]
     return jsonify(safe), 200
+
+@app.route("/students/<int:ids>", methods=["GET"])
+@require_token
+def get_student(ids):
+    if ids != g.IDs:
+        return jsonify({"error": "You can only view your own account"}), 403
+    s = find_student(ids)
+    if s is None:
+        return jsonify({"error": f"Student {ids} not found"}), 404
+    return jsonify({k: v for k, v in s.items() if k != "Password"}), 200
+
 
 @app.route("/me", methods=["GET"])
 @require_token
@@ -299,8 +324,13 @@ def view_report(idr):
     if report is None:
         return jsonify({"error": f"Report {idr} not found"}), 404
 
-    data = public_report(report)
-    data["Access"] = access_status(report, current_student())
+        data = public_report(report)
+    status = access_status(report, current_student())
+    data["Access"] = status
+    owner = find_student(report["IDs"]) or {}
+    data["Owner"] = f"{owner.get('FN', '')} {owner.get('LN', '')}".strip() or "Unknown"
+    if status != "owner":
+        data.pop("IDs", None)
     return jsonify(data), 200
 
 
@@ -348,19 +378,19 @@ def request_access(idr):
     access_requests.append(req)
     save_data()
     owner = find_student(report["IDs"]) or {}
-    return jsonify({"message": "Access request sent", "request": req,
+    return jsonify({"message": "Access request sent", "request": request_view(req),
                     "notify": owner.get("Email", ""), "title": report["Title"]}), 201
 
 @app.route("/requests/received", methods=["GET"])
 @require_token
 def received_requests():
-    return jsonify([q for q in access_requests if q["Owner"] == g.IDs]), 200
+       return jsonify([request_view(q) for q in access_requests if q["Owner"] == g.IDs]), 200
 
 
 @app.route("/requests/sent", methods=["GET"])
 @require_token
 def sent_requests():
-    return jsonify([q for q in access_requests if q["Requester"] == g.IDs]), 200
+       return jsonify([request_view(q) for q in access_requests if q["Requester"] == g.IDs]), 200
 
 
 @app.route("/requests/<int:idq>", methods=["PUT"])
@@ -388,7 +418,7 @@ def answer_request(idq):
     save_data()
     asker = find_student(req["Requester"]) or {}
     rep = find_report(req["IDr"]) or {}
-    return jsonify({"message": f"Request {data['Status']}", "request": req,
+    return jsonify({"message": f"Request {data['Status']}", "request": request_view(req),
                     "notify": asker.get("Email", ""), "title": rep.get("Title", "")}), 200
 
 # ---------- STUDENT BY ID, PUT, DELETE ----------
@@ -489,6 +519,10 @@ def delete_report(idr):
     access_requests[:] = [q for q in access_requests if q["IDr"] != idr]
     save_data()
     return jsonify({"message": f"Report {idr} deleted"}), 200
+
+
+
+
 
 
 # ---------- GLOBAL ERROR HANDLERS ----------
